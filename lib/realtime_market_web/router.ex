@@ -62,34 +62,6 @@ defmodule RealtimeMarketWeb.Router do
     post "/feed/:product_id/share", FeedController, :share
     post "/feed/:product_id/save", FeedController, :save
 
-    # User profile
-    get "/profile", UserController, :profile
-    put "/profile", UserController, :update
-    get "/profile/feed", UserController, :user_feed
-
-    # Shop management
-    get "/shops", ShopController, :index
-    post "/shops", ShopController, :create
-    get "/shops/:id", ShopController, :show
-    put "/shops/:id", ShopController, :update
-
-    # Product management
-    get "/shops/:shop_id/products", ProductController, :index
-    post "/shops/:shop_id/products", ProductController, :create
-    get "/products/:id", ProductController, :show
-    put "/products/:id", ProductController, :update
-
-    # Chat
-    get "/chat/rooms", ChatController, :rooms
-    get "/chat/rooms/:id/messages", ChatController, :messages
-    post "/chat/rooms", ChatController, :create_room
-    post "/chat/rooms/:id/messages", ChatController, :send_message
-
-    # Delivery
-    get "/delivery/track/:token", DeliveryController, :track
-    post "/delivery/:id/status", DeliveryController, :update_status
-    get "/delivery/active", DeliveryController, :active_deliveries
-
     # Payments
     post "/payments/initialize", PaymentController, :initialize
     post "/payments/verify", PaymentController, :verify

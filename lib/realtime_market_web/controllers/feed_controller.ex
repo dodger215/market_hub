@@ -54,7 +54,7 @@ defmodule RealtimeMarketWeb.FeedController do
       {:ok, product} ->
         # Enrich with media
         {:ok, media} = ProductFeed.get_product_media_for_player(product_id)
-        
+
         enriched_product = Map.merge(product, %{
           "media" => media
         })
