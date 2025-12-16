@@ -7,7 +7,7 @@ defmodule RealtimeMarket.Application do
 
   @impl true
   def start(_type, _args) do
-    RealtimeMarket.OTPStore.init() 
+    # RealtimeMarket.OTPStore.init()
     children = [
       {Mongo, Application.get_env(:realtime_market, :mongo)},
       # Start the Telemetry supervisor

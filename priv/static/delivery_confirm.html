@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Delivery Confirmation</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .pending { background-color: #fff3cd; color: #856404; }
+        .delivered { background-color: #d4edda; color: #155724; }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            margin: 10px 0;
+        }
+        .btn-confirm {
+            background-color: #28a745;
+            color: white;
+        }
+        .btn-cancel {
+            background-color: #dc3545;
+            color: white;
+        }
+        .location-info {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Delivery Confirmation</h1>
+    
+    <div id="delivery-info" class="container">
+        <h2>Delivery Details</h2>
+        <div class="location-info">
+            <p><strong>Tracking ID:</strong> <span id="tracking-id"></span></p>
+            <p><strong>Status:</strong> <span id="delivery-status" class="status pending">Pending</span></p>
+            <p><strong>Customer:</strong> <span id="customer-name"></span></p>
+            <p><strong>Location:</strong> <span id="customer-address"></span></p>
+            <p><strong>Total Amount:</strong> $<span id="total-amount"></span></p>
+        </div>
+        
+        <h3>Delivery Actions</h3>
+        <button id="confirm-btn" class="btn btn-confirm" onclick="confirmDelivery()">
+            ✅ Confirm Delivery
+        </button>
+        <button id="cancel-btn" class="btn btn-cancel" onclick="reportIssue()">
+            ❌ Report Issue
+        </button>
+        
+        <div id="otp-section" style="display: none; margin-top: 20px;">
+            <h4>OTP Verification</h4>
+            <p>Ask customer for OTP:</p>
+            <div style="font-size: 24px; font-weight: bold; text-align: center; letter-spacing: 5px; padding: 10px; background-color: #f0f0f0;" id="otp-display"></div>
+            <input type="text" id="otp-input" placeholder="Enter OTP from customer" style="width: 100%; padding: 10px; margin: 10px 0;">
+            <button onclick="verifyOTP()" class="btn btn-confirm">Verify OTP</button>
+        </div>
+    </div>
+    
+    <div id="confirmation-success" class="container" style="display: none;">
+        <h2 style="color: green;">✅ Delivery Confirmed!</h2>
+        <p>Delivery has been successfully confirmed.</p>
+        <p>Payment will now be processed for the customer.</p>
+        <p><strong>Time:</strong> <span id="delivery-time"></span></p>
+        <button onclick="closeWindow()" class="btn">Close</button>
+    </div>
+    
+    <script>
+        // Get tracking token from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const trackingToken = urlParams.get('token') || window.location.pathname.split('/').pop();
+        
+        // Fetch delivery details
+        async function loadDeliveryDetails() {
+            try {
+                const response = await fetch(`/api/delivery/track/${trackingToken}`);
+                const data = await response.json();
+                
+                document.getElementById('tracking-id').textContent = data.tracking_token;
+                document.getElementById('customer-name').textContent = data.customer_name || 'Customer';
+                document.getElementById('customer-address').textContent = data.customer_address || 'Address not provided';
+                document.getElementById('total-amount').textContent = data.total_amount || '0.00';
+                
+                if (data.status === 'delivered') {
+                    document.getElementById('delivery-status').textContent = 'Delivered';
+                    document.getElementById('delivery-status').className = 'status delivered';
+                    document.getElementById('confirm-btn').disabled = true;
+                }
+                
+                // Generate OTP
+                const otp = Math.floor(1000 + Math.random() * 9000);
+                document.getElementById('otp-display').textContent = otp;
+                sessionStorage.setItem('delivery_otp', otp);
+                
+            } catch (error) {
+                console.error('Error loading delivery details:', error);
+                alert('Could not load delivery details. Please check the tracking token.');
+            }
+        }
+        
+        function confirmDelivery() {
+            document.getElementById('otp-section').style.display = 'block';
+            document.getElementById('confirm-btn').style.display = 'none';
+        }
+        
+        async function verifyOTP() {
+            const enteredOTP = document.getElementById('otp-input').value;
+            const storedOTP = sessionStorage.getItem('delivery_otp');
+            
+            if (enteredOTP === storedOTP) {
+                // Send confirmation to server
+                try {
+                    const response = await fetch(`/api/delivery/confirm/${trackingToken}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            confirmed_at: new Date().toISOString(),
+                            otp: enteredOTP
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        // Show success message
+                        document.getElementById('delivery-info').style.display = 'none';
+                        document.getElementById('confirmation-success').style.display = 'block';
+                        document.getElementById('delivery-time').textContent = new Date().toLocaleString();
+                        
+                        // Trigger payment authorization
+                        triggerPaymentAuthorization(trackingToken);
+                    } else {
+                        alert('Failed to confirm delivery. Please try again.');
+                    }
+                } catch (error) {
+                    console.error('Error confirming delivery:', error);
+                    alert('Network error. Please check your connection.');
+                }
+            } else {
+                alert('Invalid OTP. Please check with the customer.');
+            }
+        }
+        
+        function reportIssue() {
+            const issue = prompt('Please describe the issue:');
+            if (issue) {
+                alert('Issue reported. Support will contact you shortly.');
+                // Send issue report to server
+                fetch(`/api/delivery/report-issue/${trackingToken}`, {
+                    method: 'POST',
+                    body: JSON.stringify({ issue: issue })
+                });
+            }
+        }
+        
+        async function triggerPaymentAuthorization(trackingToken) {
+            // Notify chat room to authorize payment
+            try {
+                await fetch('/api/payments/authorize', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        tracking_token: trackingToken,
+                        action: 'delivery_confirmed'
+                    })
+                });
+            } catch (error) {
+                console.error('Error triggering payment:', error);
+            }
+        }
+        
+        function closeWindow() {
+            window.close();
+        }
+        
+        // Load details on page load
+        window.onload = loadDeliveryDetails;
+    </script>
+</body>
+</html>

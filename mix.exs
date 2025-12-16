@@ -9,13 +9,15 @@ defmodule RealtimeMarket.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
-      deps: deps()
+      deps: deps(),
+      # Fix xref warnings
+      xref: [exclude: [EEx]]
     ]
   end
 
   def application do
     [
-      extra_applications: [:logger, :runtime_tools, :eex, :crypto],
+      extra_applications: [:logger, :runtime_tools, :eex, :crypto, :ssl, :inets],
       mod: {RealtimeMarket.Application, []},
     ]
   end
@@ -38,24 +40,33 @@ defmodule RealtimeMarket.MixProject do
       {:cors_plug, "~> 3.0"},
       {:plug_cowboy, "~> 2.5"},
       {:jason, "~> 1.4"},
+      {:httpoison, "~> 1.8"},  # Downgrade to 1.8 for compatibility
 
-      # MongoDB - use specific compatible version
-      {:mongodb_driver, "~> 1.2"},
-
+      # MongoDB - Use mongodb (not mongodb_driver) for Elixir 1.14
+      {:mongodb_driver, "~> 1.0", override: true},
 
       # UUID
       {:elixir_uuid, "~> 1.2"},
 
       # CORS
-      {:corsica, "~> 1.3"}
+      {:corsica, "~> 1.3"},
 
-      # Removed: guardian, joken - they depend on jose which has compatibility issues
+      # Email
+      {:gen_smtp, "~> 1.2"},
+
+      # Remove problematic jose dependency - use our custom JWT
+      # {:jose, "~> 1.11"},  # REMOVE THIS LINE
+
+      # Other
+      {:decimal, "~> 2.0"}
     ]
   end
 
   defp aliases do
     [
-      setup: ["deps.get"]
+      setup: ["deps.get"],
+      test: ["test"],
+      "assets.deploy": ["esbuild default --minify", "phx.digest"]
     ]
   end
 end

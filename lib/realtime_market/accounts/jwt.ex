@@ -1,102 +1,82 @@
 defmodule RealtimeMarket.Accounts.JWT do
   @moduledoc """
-  Simple JWT implementation without external dependencies.
-  Uses HMAC-SHA256 for signing.
+  JWT implementation using Jason and :crypto for signing.
+  Compatible with Elixir 1.14.
   """
 
-  @secret Application.compile_env!(:realtime_market, :jwt_secret)
+  @secret Application.compile_env(:realtime_market, :jwt_secret, "default_secret_change_me")
   @algorithm "HS256"
 
   @doc """
   Generates a JWT token for a user.
   """
-  def generate(user_id, expires_in_hours \\ 24) do
-    header = %{
-      "alg" => @algorithm,
-      "typ" => "JWT"
-    }
+  def generate(user_id, expires_in_hours \\ 168) do  # 7 days default
+    header = Jason.encode!(%{"alg" => @algorithm, "typ" => "JWT"})
+    |> Base.url_encode64(padding: false)
 
-    payload = %{
+    payload = Jason.encode!(%{
       "user_id" => user_id,
-      "exp" => DateTime.utc_now() |> DateTime.add(expires_in_hours, :hour) |> DateTime.to_unix(),
-      "iat" => DateTime.utc_now() |> DateTime.to_unix(),
+      "exp" => System.system_time(:second) + expires_in_hours * 3600,
+      "iat" => System.system_time(:second),
       "iss" => "realtime_market"
-    }
+    })
+    |> Base.url_encode64(padding: false)
 
-    encoded_header = Base.url_encode64(Jason.encode!(header), padding: false)
-    encoded_payload = Base.url_encode64(Jason.encode!(payload), padding: false)
+    signing_input = "#{header}.#{payload}"
+    signature = hmac_sha256(signing_input, @secret)
+    |> Base.url_encode64(padding: false)
 
-    signature = sign("#{encoded_header}.#{encoded_payload}")
-
-    "#{encoded_header}.#{encoded_payload}.#{signature}"
+    "#{header}.#{payload}.#{signature}"
   end
 
   @doc """
   Verifies and decodes a JWT token.
   """
   def verify(token) do
-    case String.split(token, ".") do
-      [encoded_header, encoded_payload, signature] ->
-        # Verify signature
-        data = "#{encoded_header}.#{encoded_payload}"
-        expected_signature = sign(data)
-
-        if Plug.Crypto.secure_compare(signature, expected_signature) do
-          # Decode payload
-          case decode_payload(encoded_payload) do
-            {:ok, payload} ->
-              # Check expiration
-              if payload["exp"] > DateTime.utc_now() |> DateTime.to_unix() do
-                {:ok, payload["user_id"], payload}
-              else
-                {:error, :expired}
-              end
-
-            {:error, reason} ->
-              {:error, reason}
-          end
-        else
-          {:error, :invalid_signature}
-        end
-
-      _ ->
-        {:error, :invalid_format}
+    with [header, payload, signature] <- String.split(token, ".", parts: 3),
+         expected_signature = hmac_sha256("#{header}.#{payload}", @secret)
+                              |> Base.url_encode64(padding: false),
+         true <- Plug.Crypto.secure_compare(signature, expected_signature),
+         {:ok, decoded_payload} <- Base.url_decode64(payload, padding: false),
+         {:ok, claims} <- Jason.decode(decoded_payload),
+         true <- claims["exp"] > System.system_time(:second) do
+      {:ok, claims["user_id"], claims}
+    else
+      [_header, _payload, _signature] -> {:error, :invalid_signature}
+      _ -> {:error, :invalid_token}
     end
   end
 
   @doc """
-  Decodes a JWT token without verification (for debugging).
+  Decodes JWT without verification (for debugging).
   """
-  def decode(token) do
-    case String.split(token, ".") do
-      [encoded_header, encoded_payload, _signature] ->
-        case {decode_header(encoded_header), decode_payload(encoded_payload)} do
-          {{:ok, header}, {:ok, payload}} -> {:ok, header, payload}
-          {{:error, reason}, _} -> {:error, reason}
-          {_, {:error, reason}} -> {:error, reason}
+  def peek(token) do
+    case String.split(token, ".", parts: 3) do
+      [header, payload, _signature] ->
+        with {:ok, header_json} <- Base.url_decode64(header, padding: false),
+             {:ok, header_map} <- Jason.decode(header_json),
+             {:ok, payload_json} <- Base.url_decode64(payload, padding: false),
+             {:ok, payload_map} <- Jason.decode(payload_json) do
+          {:ok, header_map, payload_map}
+        else
+          _ -> {:error, :invalid_token}
         end
 
-      _ ->
-        {:error, :invalid_format}
+      _ -> {:error, :invalid_format}
     end
   end
 
-  defp sign(data) do
-    :crypto.mac(:hmac, :sha256, @secret, data)
-    |> Base.url_encode64(padding: false)
-  end
-
-  defp decode_header(encoded) do
-    case Base.url_decode64(encoded, padding: false) do
-      {:ok, json} -> Jason.decode(json)
-      :error -> {:error, :invalid_base64}
+  @doc """
+  Verifies a token and returns the user ID.
+  """
+  def verify_jwt(token) do
+    case verify(token) do
+      {:ok, user_id, _claims} -> {:ok, user_id}
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp decode_payload(encoded) do
-    case Base.url_decode64(encoded, padding: false) do
-      {:ok, json} -> Jason.decode(json)
-      :error -> {:error, :invalid_base64}
-    end
+  defp hmac_sha256(data, secret) do
+    :crypto.mac(:hmac, :sha256, secret, data)
   end
 end

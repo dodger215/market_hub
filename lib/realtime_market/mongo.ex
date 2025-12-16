@@ -1,10 +1,9 @@
 defmodule RealtimeMarket.Mongo do
   @moduledoc """
-  Supervised MongoDB connection and query interface using the mongodb package.
+  MongoDB connection and query interface using mongodb package.
   """
 
   use Supervisor
-
   alias Mongo
 
   @collection_users "users"
@@ -19,17 +18,28 @@ defmodule RealtimeMarket.Mongo do
   @collection_delivery_locations "delivery_locations"
   @collection_delivery_events "delivery_events"
   @collection_subscriptions "subscriptions"
+  @collection_follows "follows"
+  @collection_notifications "notifications"
+  @collection_engagements "engagements"
+  @collection_audio "product_audio"
+  @collection_reports "reports"
+  @collection_purchase_requests "purchase_requests"
+  @collection_otp_tokens "otp_tokens"
 
   def start_link(opts) do
     Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
   def init(_opts) do
-    # Get MongoDB configuration
     mongo_config = Application.get_env(:realtime_market, :mongo)
 
     children = [
-      {Mongo, [name: :mongo, database: mongo_config[:database], seeds: mongo_config[:seeds]]}
+      {Mongo, [
+        name: :mongo,
+        database: mongo_config[:database],
+        seeds: mongo_config[:seeds] || ["localhost:27017"],
+        pool_size: mongo_config[:pool_size] || 10
+      ]}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
@@ -48,8 +58,15 @@ defmodule RealtimeMarket.Mongo do
   def delivery_locations_collection, do: @collection_delivery_locations
   def delivery_events_collection, do: @collection_delivery_events
   def subscriptions_collection, do: @collection_subscriptions
+  def follows_collection, do: @collection_follows
+  def notifications_collection, do: @collection_notifications
+  def engagements_collection, do: @collection_engagements
+  def audio_collection, do: @collection_audio
+  def reports_collection, do: @collection_reports
+  def purchase_requests_collection, do: @collection_purchase_requests
+  def otp_tokens_collection, do: @collection_otp_tokens
 
-  # Generic CRUD operations
+  # CRUD operations
   def insert_one(collection, document) do
     Mongo.insert_one(:mongo, collection, document)
   end
@@ -80,7 +97,11 @@ defmodule RealtimeMarket.Mongo do
     |> Enum.to_list()
   end
 
-  # UUID generation helper
+  def count(collection, filter \\ %{}) do
+    Mongo.count(:mongo, collection, filter, [])
+  end
+
+  # UUID generation
   def generate_uuid do
     UUID.uuid4()
   end
@@ -92,5 +113,10 @@ defmodule RealtimeMarket.Mongo do
 
   def timestamp do
     DateTime.utc_now() |> DateTime.to_iso8601()
+  end
+
+  # Connection check
+  def ping do
+    Mongo.command(:mongo, %{ping: 1})
   end
 end

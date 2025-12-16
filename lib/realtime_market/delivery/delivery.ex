@@ -6,14 +6,14 @@ defmodule RealtimeMarket.Delivery.Delivery do
   alias RealtimeMarket.Mongo
 
   @collection Mongo.deliveries_collection()
-  @delivery_persons_collection Mongo.delivery_persons_collection()
+  # @delivery_persons_collection Mongo.delivery_persons_collection()
 
   @statuses ["assigned", "in_transit", "arrived", "delivered", "cancelled"]
 
   @doc """
   Creates a new delivery.
   """
-  def create(shop_id, customer_id, delivery_person_id, attrs) do
+  def create(shop_id, customer_id, delivery_person_id, _attrs) do
     delivery_id = Mongo.generate_uuid()
     tracking_token = generate_tracking_token()
     now = Mongo.now()

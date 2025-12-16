@@ -3,10 +3,22 @@ defmodule RealtimeMarketWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
-    plug CORSPlug, origin: "*"  # Add CORS support
+    plug CORSPlug, origin: "*"
   end
 
-  # Public API routes (no authentication required)
+  pipeline :api_auth do
+    plug :accepts, ["json"]
+    plug CORSPlug, origin: "*"
+    plug RealtimeMarketWeb.AuthPlug
+  end
+
+  pipeline :browser do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :protect_from_forgery
+  end
+
+  # Public API routes
   scope "/api", RealtimeMarketWeb do
     pipe_through :api
 
@@ -14,72 +26,84 @@ defmodule RealtimeMarketWeb.Router do
     post "/auth/request-otp", AuthController, :request_otp
     post "/auth/verify-otp", AuthController, :verify_otp
     post "/auth/register", AuthController, :register
+    post "/auth/login", AuthController, :login
     get "/auth/check-username/:username", AuthController, :check_username
+    get "/auth/health", AuthController, :health
 
-    # Health check
-    get "/health", AuthController, :health
+    # Public media (no auth required for viewing)
+    get "/media/:id", MediaController, :show
+
+    # Public follow stats
+    get "/follow/stats/:user_id", FollowController, :stats
   end
 
-  # Protected API routes (require authentication)
-  pipeline :api_auth do
-    plug :accepts, ["json"]
-    plug CORSPlug, origin: "*"
-    plug :authenticate  # Custom authentication plug
-  end
-
+  # Protected API routes
   scope "/api", RealtimeMarketWeb do
     pipe_through :api_auth
 
-    # Protected routes here (to be added later)
-    # get "/profile", UserController, :profile
-    # get "/shops", ShopController, :index
+    # Media uploads (protected)
+    post "/media/upload", MediaController, :upload
+    delete "/media/:id", MediaController, :delete
+
+    # Follow system (protected)
+    post "/follow", FollowController, :follow
+    post "/unfollow", FollowController, :unfollow
+    get "/followers", FollowController, :followers
+    get "/following", FollowController, :following
+    get "/follow/check/:following_id", FollowController, :check
+    get "/follow/stats", FollowController, :stats
+
+    # Feed API (protected)
+    get "/feed", FeedController, :index
+    get "/feed/trending", FeedController, :trending
+    get "/feed/:product_id", FeedController, :show
+    get "/feed/:product_id/media", FeedController, :media
+    post "/feed/:product_id/like", FeedController, :like
+    post "/feed/:product_id/share", FeedController, :share
+    post "/feed/:product_id/save", FeedController, :save
+
+    # User profile
+    get "/profile", UserController, :profile
+    put "/profile", UserController, :update
+    get "/profile/feed", UserController, :user_feed
+
+    # Shop management
+    get "/shops", ShopController, :index
+    post "/shops", ShopController, :create
+    get "/shops/:id", ShopController, :show
+    put "/shops/:id", ShopController, :update
+
+    # Product management
+    get "/shops/:shop_id/products", ProductController, :index
+    post "/shops/:shop_id/products", ProductController, :create
+    get "/products/:id", ProductController, :show
+    put "/products/:id", ProductController, :update
+
+    # Chat
+    get "/chat/rooms", ChatController, :rooms
+    get "/chat/rooms/:id/messages", ChatController, :messages
+    post "/chat/rooms", ChatController, :create_room
+    post "/chat/rooms/:id/messages", ChatController, :send_message
+
+    # Delivery
+    get "/delivery/track/:token", DeliveryController, :track
+    post "/delivery/:id/status", DeliveryController, :update_status
+    get "/delivery/active", DeliveryController, :active_deliveries
+
+    # Payments
+    post "/payments/initialize", PaymentController, :initialize
+    post "/payments/verify", PaymentController, :verify
+    get "/payments/history", PaymentController, :history
   end
 
-  # Enable LiveDashboard and Swoosh mailbox preview in development
+  # Development routes
   if Application.compile_env(:realtime_market, :dev_routes) do
-    # If you want to use the LiveDashboard in production, you should put
-    # it behind authentication and allow only admins to access it.
-    # If your application does not have an admins-only section yet,
-    # you can use Plug.BasicAuth to set up some basic authentication
-    # as long as you are also using SSL (which you should anyway).
-    import Phoenix.LiveDashboard.Router
-
     scope "/dev" do
       pipe_through [:fetch_session, :protect_from_forgery]
 
+      import Phoenix.LiveDashboard.Router
       live_dashboard "/dashboard", metrics: RealtimeMarketWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
-    end
-  end
-
-  # Custom authentication plug
-  defp authenticate(conn, _opts) do
-    case get_auth_token(conn) do
-      {:ok, token} ->
-        case RealtimeMarket.Accounts.Auth.verify_jwt(token) do
-          {:ok, user_id} ->
-            # Store user_id in conn assigns for use in controllers
-            assign(conn, :current_user_id, user_id)
-
-          {:error, _reason} ->
-            conn
-            |> put_status(:unauthorized)
-            |> json(%{error: "Invalid token"})
-            |> halt()
-        end
-
-      :error ->
-        conn
-        |> put_status(:unauthorized)
-        |> json(%{error: "Missing authentication token"})
-        |> halt()
-    end
-  end
-
-  defp get_auth_token(conn) do
-    case get_req_header(conn, "authorization") do
-      ["Bearer " <> token] -> {:ok, token}
-      _ -> :error
     end
   end
 end

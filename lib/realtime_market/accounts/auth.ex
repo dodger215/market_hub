@@ -1,86 +1,131 @@
 defmodule RealtimeMarket.Accounts.Auth do
   @moduledoc """
-  Authentication service with OTP.
+  Authentication module for OTP and JWT handling.
   """
 
-  alias RealtimeMarket.Accounts.User
-  alias RealtimeMarket.Accounts.JWT
+  alias RealtimeMarket.Accounts.{User, JWT}
+  alias RealtimeMarket.Mongo
 
-  @otp_length 6
-  @otp_validity_minutes 10
-
-  # In-memory OTP store (use Redis in production)
-  @otp_store :ets.new(:otp_store, [:set, :public, :named_table])
+  @otp_collection "otp_tokens"
+  @otp_expiry_seconds 600  # 10 minutes
 
   @doc """
-  Generates and stores OTP for phone number.
+  Generates OTP for a phone number.
   """
   def generate_otp(phone_number) do
-    otp = Enum.map(1..@otp_length, fn _ -> Enum.random(0..9) end) |> Enum.join()
-    expires_at = DateTime.utc_now() |> DateTime.add(@otp_validity_minutes * 60, :second)
+    # Clean phone number
+    clean_phone = String.replace(phone_number, ~r/\D/, "")
 
-    :ets.insert(@otp_store, {phone_number, otp, expires_at})
+    # Generate 6-digit OTP
+    otp = :rand.uniform(1_000_000) - 1
+    |> Integer.to_string()
+    |> String.pad_leading(6, "0")
 
-    # In production, send via SMS service
-    {:ok, otp}
+    # Store OTP
+    otp_id = Mongo.generate_uuid()
+    now = Mongo.now()
+
+    otp_doc = %{
+      "_id" => otp_id,
+      "phone_number" => clean_phone,
+      "otp" => otp,
+      "created_at" => now,
+      "expires_at" => DateTime.add(now, @otp_expiry_seconds, :second)
+    }
+
+    # Delete old OTPs for this phone
+    Mongo.delete_many(@otp_collection, %{"phone_number" => clean_phone})
+
+    # Insert new OTP
+    case Mongo.insert_one(@otp_collection, otp_doc) do
+      {:ok, _} ->
+        # In production, send via SMS
+        if Mix.env() == :dev do
+          IO.puts("DEBUG OTP for #{clean_phone}: #{otp}")
+        end
+        {:ok, otp}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   @doc """
-  Verifies OTP and returns JWT on success.
+  Verifies OTP and generates JWT token.
   """
   def verify_otp(phone_number, otp) do
-    case :ets.lookup(@otp_store, phone_number) do
-      [{^phone_number, ^otp, expires_at}] ->
-        if DateTime.compare(DateTime.utc_now(), expires_at) == :lt do
-          :ets.delete(@otp_store, phone_number)
+    clean_phone = String.replace(phone_number, ~r/\D/, "")
 
-          # Get or create user
-          case User.get_by_phone(phone_number) do
+    # Find OTP
+    case Mongo.find_one(@otp_collection, %{
+      "phone_number" => clean_phone,
+      "otp" => otp
+    }) do
+      nil ->
+        {:error, :invalid_otp}
+
+      otp_doc ->
+        # Check expiration
+        if DateTime.compare(DateTime.utc_now(), otp_doc["expires_at"]) == :lt do
+          # Get user
+          case User.get_by_phone(clean_phone) do
             {:ok, user} ->
+              # Generate JWT token
               token = JWT.generate(user["_id"])
-              User.update_last_login(user["_id"])
+
+              # Delete used OTP
+              Mongo.delete_one(@otp_collection, %{"_id" => otp_doc["_id"]})
+
               {:ok, token, user}
 
             {:error, :not_found} ->
-              # Auto-create user with random username
-              username = "user_#{String.slice(phone_number, -8..-1)}"
-              {:ok, user} = User.create(%{phone_number: phone_number, username: username})
-              token = JWT.generate(user["_id"])
-              {:ok, token, user}
+              # User doesn't exist yet (first-time registration)
+              {:error, :user_not_found}
           end
         else
-          :ets.delete(@otp_store, phone_number)
+          # OTP expired
+          Mongo.delete_one(@otp_collection, %{"_id" => otp_doc["_id"]})
           {:error, :expired}
         end
-
-      _ ->
-        {:error, :invalid_otp}
     end
   end
 
   @doc """
-  Verifies JWT and extracts user_id.
-  """
-  def verify_jwt(token) do
-    case JWT.verify(token) do
-      {:ok, user_id, _payload} -> {:ok, user_id}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @doc """
-  Authenticates socket connection via token.
+  Verifies JWT token from WebSocket connection.
   """
   def authenticate_socket(token) do
-    case verify_jwt(token) do
+    case JWT.verify_jwt(token) do
       {:ok, user_id} ->
-        case User.get(user_id) do
+        case User.get_by_id(user_id) do
           {:ok, user} -> {:ok, user}
           {:error, _} -> {:error, :user_not_found}
         end
 
-      {:error, _} ->
-        {:error, :invalid_token}
+      {:error, reason} ->
+        {:error, reason}
     end
+  end
+
+  @doc """
+  Verifies JWT token (alias for verify_jwt).
+  """
+  def verify_jwt(token) do
+    JWT.verify_jwt(token)
+  end
+
+   @doc """
+  Generates a short-lived token for specific actions.
+  """
+  def generate_action_token(user_id, _action, expires_in_seconds \\ 300) do
+    JWT.generate(user_id, div(expires_in_seconds, 3600))
+  end
+
+  @doc """
+  Validates password (when you add password auth later).
+  """
+  def validate_password(password, hashed_password) do
+    # Implement password validation with bcrypt or similar
+    # For now, basic comparison
+    password == hashed_password
   end
 end

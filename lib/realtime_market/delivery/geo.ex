@@ -4,11 +4,12 @@ defmodule RealtimeMarket.Delivery.Geo do
   """
 
   @earth_radius_km 6371
-  @earth_radius_miles 3959
+  # @earth_radius_miles 3959
 
   @doc """
   Calculates distance between two coordinates in kilometers.
   """
+
   def haversine_distance({lat1, lon1}, {lat2, lon2}, unit \\ :km) do
     # Convert to radians
     {lat1_rad, lon1_rad, lat2_rad, lon2_rad} = {

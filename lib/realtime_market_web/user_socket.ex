@@ -7,6 +7,7 @@ defmodule RealtimeMarketWeb.UserSocket do
 
   ## Channels
   channel "chat:*", RealtimeMarketWeb.ChatChannel
+  channel "feed:*", RealtimeMarketWeb.FeedChannel
   channel "delivery:*", RealtimeMarketWeb.DeliveryChannel
 
   # Socket params are passed from the client and can
